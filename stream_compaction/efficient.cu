@@ -7,8 +7,10 @@ namespace StreamCompaction {
     namespace Efficient {
 
         // Block variables
-        #define blockSize 128
+        int blockSize = 128;
         dim3 threadsPerBlock(blockSize);
+
+        bool MEMORY_BANK_OPTIMIIZED = 1;
 
         // Data buffers
         int* dev_idata;
@@ -17,6 +19,20 @@ namespace StreamCompaction {
         int* dev_indices;
         int* dev_odata;
         int* dev_blockSums;
+
+        // Macros for avoiding shared memory bank conflicts
+        #define NUM_BANKS 32
+        #define LOG_NUM_BANKS 5
+        #define CONFLICT_FREE_OFFSET(n) ((n) >> LOG_NUM_BANKS)
+
+        void setBlockSize(int newBlockSize) {
+          blockSize = newBlockSize;
+          threadsPerBlock = dim3(blockSize);
+        }
+
+        void setMemoryBankOptimized(bool memBankOptimized) {
+          MEMORY_BANK_OPTIMIIZED = memBankOptimized;
+        }
 
         using StreamCompaction::Common::PerformanceTimer;
         PerformanceTimer& timer()
@@ -30,7 +46,7 @@ namespace StreamCompaction {
           int index = (blockIdx.x * blockDim.x) + threadIdx.x;
           int parentIdx = (index + 1) * currOffset * 2 - 1;
           int leftChildIdx = parentIdx - currOffset;
-          if (parentIdx >= nearestPow2) {
+          if (parentIdx >= nearestPow2 || leftChildIdx < 0) {
             return;
           }
           data[parentIdx] += data[leftChildIdx];
@@ -40,7 +56,7 @@ namespace StreamCompaction {
           int index = (blockIdx.x * blockDim.x) + threadIdx.x;
           int parentIdx = (index + 1) * currOffset * 2 - 1;
           int leftChildIdx = parentIdx - currOffset;
-          if (parentIdx >= nearestPow2) {
+          if (parentIdx >= nearestPow2 || leftChildIdx < 0) {
             return;
           }
           int temp = data[leftChildIdx];
@@ -73,6 +89,7 @@ namespace StreamCompaction {
               // Only call the number of threads that actually need to write no values in the current sweep level
               dim3 fullBlocksPerGrid((nearestPow2 / (currOffset * 2) + blockSize - 1) / blockSize);
               kernUpSweep<<<fullBlocksPerGrid, threadsPerBlock>>> (nearestPow2, currOffset, dev_indices);
+              checkCUDAError("kernUpSweep failed");
             }
 
             // Set last value after upsweep to 0
@@ -84,6 +101,7 @@ namespace StreamCompaction {
               // Only call the number of threads that actually need to write no values in the current sweep level
               dim3 fullBlocksPerGrid((nearestPow2 / (currOffset * 2) + blockSize - 1) / blockSize);
               kernDownSweep<<<fullBlocksPerGrid, threadsPerBlock >>> (nearestPow2, currOffset, dev_indices);
+              checkCUDAError("kernDownSweep failed");
             }
 
             timer().endGpuTimer();
@@ -97,6 +115,7 @@ namespace StreamCompaction {
 
         }
 
+        // bank conflict unoptimized version
         __global__ void kernSharedMemScan(int n, int* odata, int* idata, int* blockSums) {
           extern __shared__ int temp[];
           // Only one block to maintain shared memory
@@ -137,6 +156,60 @@ namespace StreamCompaction {
           __syncthreads();
           odata[2 * index + blockStartIndex] = temp[2 * index];
           odata[2 * index + blockStartIndex + 1] = temp[2 * index + 1];
+
+        }
+
+        // bank optimized version
+        __global__ void kernSharedMemBankOptimizedScan(int n, int* odata, int* idata, int* blockSums) {
+          extern __shared__ int temp[];
+          // Only one block to maintain shared memory
+          int index = threadIdx.x;
+          int blockStartIndex = blockIdx.x * 2048;
+          int offset = 1;
+          //load entire input into shared mem
+          int dataToLoadA = index;
+          int dataToLoadB = index + (n / 2);
+          int bankOffsetA = CONFLICT_FREE_OFFSET(dataToLoadA);
+          int bankOffsetB = CONFLICT_FREE_OFFSET(dataToLoadB);
+
+          temp[dataToLoadA + bankOffsetA] = idata[dataToLoadA + blockStartIndex];
+          temp[dataToLoadB + bankOffsetB] = idata[dataToLoadB + blockStartIndex];
+
+          // upsweep
+          for (int d = n >> 1; d > 0; d >>= 1) {
+            __syncthreads();
+            if (index < d) {
+              int leftChild = offset * (2 * index + 1) - 1;
+              int parent = offset * (2 * index + 2) - 1;
+              leftChild += CONFLICT_FREE_OFFSET(leftChild);
+              parent += CONFLICT_FREE_OFFSET(parent);
+              temp[parent] += temp[leftChild];
+            }
+            offset *= 2;
+          }
+          __syncthreads();
+          // capture last elem in block sums then zero it out zero out last element of temp array
+          if (index == 0) {
+            blockSums[blockIdx.x] = temp[n - 1 + CONFLICT_FREE_OFFSET(n - 1)];
+            temp[n - 1 + CONFLICT_FREE_OFFSET(n - 1)] = 0;
+          }
+          //downsweep
+          for (int d = 1; d < n; d *= 2) {
+            offset >>= 1;
+            __syncthreads();
+            if (index < d) {
+              int leftChild = offset * (2 * index + 1) - 1;
+              int parent = offset * (2 * index + 2) - 1;
+              leftChild += CONFLICT_FREE_OFFSET(leftChild);
+              parent += CONFLICT_FREE_OFFSET(parent);
+              int saved = temp[leftChild];
+              temp[leftChild] = temp[parent];
+              temp[parent] += saved;
+            }
+          }
+          __syncthreads();
+          odata[dataToLoadA + blockStartIndex] = temp[dataToLoadA + bankOffsetA];
+          odata[dataToLoadB + blockStartIndex] = temp[dataToLoadB + bankOffsetB];
           
         }
 
@@ -152,6 +225,8 @@ namespace StreamCompaction {
         void sharedMemScan(int n, int* odata, const int* idata) {
           // max allowed in shared memory of one block
           if (n > 1 << 22) {
+            timer().startGpuTimer();
+            timer().endGpuTimer();
             return;
           }
           int iters = ilog2ceil(n);
@@ -183,15 +258,31 @@ namespace StreamCompaction {
 
           if (blocksNeeded == 1) {
             // only need one block
-            kernSharedMemScan <<<1, nearestPow2 / 2, nearestPow2 * sizeof(int) >> > (nearestPow2, dev_odata, dev_indices, dev_blockSums);
+            if (MEMORY_BANK_OPTIMIIZED) {
+              kernSharedMemBankOptimizedScan << <1, nearestPow2 / 2, (nearestPow2 + CONFLICT_FREE_OFFSET(nearestPow2))* sizeof(int) >> > (nearestPow2, dev_odata, dev_indices, dev_blockSums);
+            }
+            else {
+              kernSharedMemScan << <1, nearestPow2 / 2, nearestPow2 * sizeof(int) >> > (nearestPow2, dev_odata, dev_indices, dev_blockSums);
+            }
           }
           else {
             // need multiple blocks and to scan block sums
-            kernSharedMemScan <<<blocksNeeded, 1024, 1024 * 2 * sizeof(int) >> > (2048, dev_odata, dev_indices, dev_blockSums);
-            kernSharedMemScan<<< 1, (blocksNeeded + 1) / 2, blocksNeeded * sizeof(int) >>> (blocksNeeded, dev_scanned, dev_blockSums, dev_blockSums);
+
+            if (MEMORY_BANK_OPTIMIIZED) {
+              kernSharedMemBankOptimizedScan<<<blocksNeeded, 1024,( 2048 + (CONFLICT_FREE_OFFSET(2048))) * sizeof(int) >>> (2048, dev_odata, dev_indices, dev_blockSums);
+              kernSharedMemBankOptimizedScan<<<1, (blocksNeeded + 1) / 2, (blocksNeeded + CONFLICT_FREE_OFFSET(blocksNeeded)) * sizeof(int) >>> (blocksNeeded, dev_scanned, dev_blockSums, dev_blockSums);
+
+              dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
+              kernAddBlockSums<<<fullBlocksPerGrid, threadsPerBlock >> > (n, dev_odata, dev_scanned);
+            }
+            else {
+              kernSharedMemScan<<<blocksNeeded, 1024, 1024 * 2 * sizeof(int) >>> (2048, dev_odata, dev_indices, dev_blockSums);
+              kernSharedMemScan<<< 1, (blocksNeeded + 1) / 2, blocksNeeded * sizeof(int) >>> (blocksNeeded, dev_scanned, dev_blockSums, dev_blockSums);
+
+              dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
+              kernAddBlockSums<<<fullBlocksPerGrid, threadsPerBlock >>> (n, dev_odata, dev_scanned);
+            }
             
-            dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
-            kernAddBlockSums <<<fullBlocksPerGrid , threadsPerBlock >>> (n, dev_odata, dev_scanned);
           }
 
           timer().endGpuTimer();

@@ -11,5 +11,9 @@ namespace StreamCompaction {
         void sharedMemScan(int n, int* odata, const int* idata);
 
         int compact(int n, int *odata, const int *idata);
+
+        void setBlockSize(int newBlockSize);
+
+        void setMemoryBankOptimized(bool memBankOptimized);
     }
 }

@@ -13,7 +13,7 @@ namespace StreamCompaction {
         }
 
         // Block variables
-        #define blockSize 128
+        int blockSize = 128;
         dim3 threadsPerBlock(blockSize);
 
         // Data buffers
@@ -25,6 +25,11 @@ namespace StreamCompaction {
         int* dev_indices;
         int* dev_scatterBools;
         int* dev_odata;
+
+        void setBlockSize(int newBlockSize) {
+          blockSize = newBlockSize;
+          threadsPerBlock = dim3(blockSize);
+        }
 
         __global__ void kernUpSweep(int nearestPow2, int currOffset, int* data) {
           int index = (blockIdx.x * blockDim.x) + threadIdx.x;
@@ -116,7 +121,8 @@ namespace StreamCompaction {
 
           dim3 fullBlocksPerGrid((n + blockSize - 1) / blockSize);
 
-          const int numBits = 32;
+          // Cap at values at integer values up to million, can increase up to 32 for larger integers
+          const int numBits = 20;
           for (int i = 0; i < numBits; i++) {
             // split based on the ith least significant bit
             // isolate current bit

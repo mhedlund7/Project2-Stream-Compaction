@@ -7,5 +7,7 @@ namespace StreamCompaction {
         StreamCompaction::Common::PerformanceTimer& timer();
 
         void radix(int n, int *odata, const int *idata);
+
+        void setBlockSize(int newBlockSize);
     }
 }

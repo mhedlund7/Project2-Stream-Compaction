@@ -8,12 +8,17 @@ namespace StreamCompaction {
         using StreamCompaction::Common::PerformanceTimer;
 
         // Block variables
-        #define blockSize 128
+        int blockSize = 128;
         dim3 threadsPerBlock(blockSize);
 
         // Data buffers to swap between each itertion
         int* dev_dataBuf1;
         int* dev_dataBuf2;
+
+        void setBlockSize(int newBlockSize) {
+          blockSize = newBlockSize;
+          threadsPerBlock = dim3(blockSize);
+        }
 
         PerformanceTimer& timer()
         {
