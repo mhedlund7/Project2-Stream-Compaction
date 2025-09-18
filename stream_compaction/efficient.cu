@@ -46,7 +46,7 @@ namespace StreamCompaction {
           int index = (blockIdx.x * blockDim.x) + threadIdx.x;
           int parentIdx = (index + 1) * currOffset * 2 - 1;
           int leftChildIdx = parentIdx - currOffset;
-          if (parentIdx >= nearestPow2 || leftChildIdx < 0) {
+          if (parentIdx >= nearestPow2 || leftChildIdx < 0 || leftChildIdx >= nearestPow2 || parentIdx < 0) {
             return;
           }
           data[parentIdx] += data[leftChildIdx];
@@ -56,7 +56,7 @@ namespace StreamCompaction {
           int index = (blockIdx.x * blockDim.x) + threadIdx.x;
           int parentIdx = (index + 1) * currOffset * 2 - 1;
           int leftChildIdx = parentIdx - currOffset;
-          if (parentIdx >= nearestPow2 || leftChildIdx < 0) {
+          if (parentIdx >= nearestPow2 || leftChildIdx < 0 || leftChildIdx >= nearestPow2 || parentIdx < 0) {
             return;
           }
           int temp = data[leftChildIdx];
@@ -73,9 +73,9 @@ namespace StreamCompaction {
             int nearestPow2 = 1 << iters;
 
             // set up device arrays to the nearest power of 2
-            cudaMalloc((void**)&dev_indices, nearestPow2 * sizeof(int));
+            cudaMalloc((void**)&dev_indices, (nearestPow2 + 1) * sizeof(int));
             checkCUDAError("cudaMalloc dev_indices failed!");
-            cudaMemset(dev_indices, 0, nearestPow2 * sizeof(int));
+            cudaMemset(dev_indices, 0, (nearestPow2 + 1) * sizeof(int));
             checkCUDAError("cudaMemset dev_indices failed!");
             cudaMemcpy(dev_indices, idata, n * sizeof(int), cudaMemcpyHostToDevice);
             checkCUDAError("cudaMemcpy to device failed!");
@@ -90,6 +90,8 @@ namespace StreamCompaction {
               dim3 fullBlocksPerGrid((nearestPow2 / (currOffset * 2) + blockSize - 1) / blockSize);
               kernUpSweep<<<fullBlocksPerGrid, threadsPerBlock>>> (nearestPow2, currOffset, dev_indices);
               checkCUDAError("kernUpSweep failed");
+              cudaError_t e = cudaDeviceSynchronize();                       // runtime errors
+              if (e != cudaSuccess) { fprintf(stderr, "upsweep error: %s\n", cudaGetErrorString(e)); }
             }
 
             // Set last value after upsweep to 0
@@ -102,6 +104,8 @@ namespace StreamCompaction {
               dim3 fullBlocksPerGrid((nearestPow2 / (currOffset * 2) + blockSize - 1) / blockSize);
               kernDownSweep<<<fullBlocksPerGrid, threadsPerBlock >>> (nearestPow2, currOffset, dev_indices);
               checkCUDAError("kernDownSweep failed");
+              cudaError_t e = cudaDeviceSynchronize();                       // runtime errors
+              if (e != cudaSuccess) { fprintf(stderr, "downsweep error: %s\n", cudaGetErrorString(e)); }
             }
 
             timer().endGpuTimer();

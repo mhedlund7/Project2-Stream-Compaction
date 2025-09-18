@@ -49,7 +49,7 @@ static double getAvgCPUScanData(int n, int* o, int* in) {
   double sum = 0.0;
   for (int i = 0; i < numRuns; i++) {
     StreamCompaction::CPU::scan(n, o, in);
-    sum += StreamCompaction::CPU::timer().getGpuElapsedTimeForPreviousOperation();
+    sum += StreamCompaction::CPU::timer().getCpuElapsedTimeForPreviousOperation();
   }
   return sum / numRuns;
 }
@@ -99,7 +99,8 @@ static double getAvgCPUCompactWithoutScanData(int n, int* o, int* in) {
   double sum = 0.0;
   for (int i = 0; i < numRuns; i++) {
     StreamCompaction::CPU::compactWithoutScan(n, o, in);
-    sum += StreamCompaction::CPU::timer().getGpuElapsedTimeForPreviousOperation();
+    sum += StreamCompaction::CPU::timer().getCpuElapsedTimeForPreviousOperation();
+
   }
   return sum / numRuns;
 }
@@ -109,7 +110,7 @@ static double getAvgCPUCompactWithScanData(int n, int* o, int* in) {
   double sum = 0.0;
   for (int i = 0; i < numRuns; i++) {
     StreamCompaction::CPU::compactWithScan(n, o, in);
-    sum += StreamCompaction::CPU::timer().getGpuElapsedTimeForPreviousOperation();
+    sum += StreamCompaction::CPU::timer().getCpuElapsedTimeForPreviousOperation();
   }
   return sum / numRuns;
 }
@@ -143,7 +144,7 @@ void collectData() {
   }
   dataFile << "implementation,block_size,array_size,power_of_two,time_ms\n";
 
-  const int MAXN = 1 << 27 + 1;
+  const int MAXN = (1 << 27) +1;
   int* a = new int[MAXN];
   int* b = new int[MAXN];
   int* c = new int[MAXN];
@@ -176,7 +177,7 @@ void collectData() {
     //EfficientStreamCompaction
     fillCompactArray(currSize, a);
     zeroArray(currSize, c);
-    t = getAvgNaiveScanData(currSize, c, a);
+    t = getAvgEfficientCompactData(currSize, c, a);
     dataFile << "EfficientCompact," << blockSize << "," << currSize << "," << powerOfTwoFlag << "," << t << "\n";
 
     //CPUCompactWithScan
@@ -200,8 +201,8 @@ void collectData() {
 
   int blockSize = 256;
   setAllBlockSizes(blockSize);
-  const int arraySizes[] = { 1 << 8, 1 << 10, 1 << 13, 1 << 15, 1 << 17, 1 << 20, 1 << 22, 1 << 24, 1 << 26,  1 << 27 };
-  const int numSizes = 10;
+  const int arraySizes[] = { 1 << 8, 1 << 10, 1 << 13, 1 << 15, 1 << 17, 1 << 20, 1 << 22, 1 << 24, 1 << 26};
+  const int numSizes = 9;
 
   // Powers of 2
   for (int i = 0; i < numSizes; i++) {
@@ -244,7 +245,7 @@ void collectData() {
     //EfficientStreamCompaction
     fillCompactArray(currSize, a);
     zeroArray(currSize, c);
-    t = getAvgNaiveScanData(currSize, c, a);
+    t = getAvgEfficientCompactData(currSize, c, a);
     dataFile << "EfficientCompact," << blockSize << "," << currSize << "," << powerOfTwoFlag << "," << t << "\n";
 
     //CPUCompactWithScan
@@ -306,7 +307,7 @@ void collectData() {
     //EfficientStreamCompaction
     fillCompactArray(currSize, a);
     zeroArray(currSize, c);
-    t = getAvgNaiveScanData(currSize, c, a);
+    t = getAvgEfficientCompactData(currSize, c, a);
     dataFile << "EfficientCompact," << blockSize << "," << currSize << "," << powerOfTwoFlag << "," << t << "\n";
 
     //CPUCompactWithScan
