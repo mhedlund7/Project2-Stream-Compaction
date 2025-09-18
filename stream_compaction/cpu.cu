@@ -20,6 +20,11 @@ namespace StreamCompaction {
         void scan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            int sum = 0;
+            for (int i = 0; i < n; i++) {
+                odata[i] = sum;
+                sum += idata[i];
+            }
             timer().endCpuTimer();
         }
 
@@ -30,9 +35,16 @@ namespace StreamCompaction {
          */
         int compactWithoutScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
+            int writeOffset = 0;
+            for (int i = 0; i < n; i++) {
+                if (idata[i] != 0) {
+                    odata[writeOffset] = idata[i];
+                    writeOffset++;
+                }
+            }
             // TODO
             timer().endCpuTimer();
-            return -1;
+            return writeOffset;
         }
 
         /**
@@ -43,8 +55,38 @@ namespace StreamCompaction {
         int compactWithScan(int n, int *odata, const int *idata) {
             timer().startCpuTimer();
             // TODO
+            int* temp = new int[n];
+            // create temp array
+            int* scanned = new int[n];
+            for (int i = 0; i < n; i++) {
+                temp[i] = idata[i] == 0 ? 0 : 1;
+            }
+            
+            // scan temp array
+            int sum = 0;
+            for (int i = 0; i < n; i++) {
+              scanned[i] = sum;
+              sum += temp[i];
+            }
+
+            // scatter
+            for (int i = 0; i < n; i++) {
+                if (temp[i]) {
+                    odata[scanned[i]] = idata[i];
+                }
+            }
+            int count = scanned[n - 1] + temp[n - 1];
             timer().endCpuTimer();
-            return -1;
+            return count;
+        }
+
+        // CPU sort for testing GPU radix sort
+        void sort(int n, int *odata, const int *idata) {
+            timer().startCpuTimer();
+            // TODO
+            memcpy(odata, idata, n * sizeof(int));
+            std::sort(odata, odata + n);
+            timer().endCpuTimer();
         }
     }
 }
