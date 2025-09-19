@@ -65,7 +65,7 @@ The GPU implementation of stream compaction directly leverages scan. First, the 
 |GPU Stream Compaction from CIS 5650 slides|
 
 ### GPU Radix Sort
-Lastly, I implemented radix sort on the GPU leveraging both scan and scatter. Radix sort works by processing the binary representation of each integer starting from the least significant bit until the most significant. At each iteration, the algorithm partitions the array so that all elements with a 0 in the current bit appear before any with a 1, while preserving the relative order of elements in each of the partitions.
+Lastly, I implemented radix sort on the GPU leveraging both scan and scatter. Radix sort works by processing the binary representation of each integer starting from the least significant bit until the most significant. At each iteration, the algorithm partitions the array so that all elements with a zero in the current bit appear before any with a one, while preserving the relative order of elements in each of the partitions.
 ![CPU Radix Sort](img/figure13.png)|
 |:--:|
 |CPU Radix Sort from CIS 5650 slides|
