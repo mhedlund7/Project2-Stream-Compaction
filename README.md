@@ -47,9 +47,12 @@ To improve on the naive approach, work efficient scan organizes the array as a b
 ### Shared Memory GPU Scan
 The shared memory GPU scan is based on the work efficient implementation but leverages shared memory over global memory to improve lookup speed. Each thread loads two elements from global memory into shared memory so that each block can process up to 2048 elements effectively. For arrays larger than 2048 elements, we first divide the original array into tiles of length 2048 that are then processed in parallel with the total sums of each tile being stored into a block sums array. This block sums array is then itself scanned using the shared memory implementations and the results are added back to each tile to compute the final prefix sums.
 
-|![Shared Memory Scan](img/figure17.png)|
-|:--:|
-|Shared Memory Scan from GPU Gems 39.2.4|
+<p align="center">
+  <img src="img/figure17.png" alt="Shared Memory Scan" width="500"/>
+  <br>
+  <i>Shared Memory Scan from GPU Gems 39.2.4</i>
+</p>
+
 
 ### Thrust Scan
 I also made a simple wrapper around Thrust's scan function to compare my implementations against.
@@ -62,7 +65,7 @@ The GPU implementation of stream compaction directly leverages scan. First, the 
 |GPU Stream Compaction from CIS 5650 slides|
 
 ### GPU Radix Sort
-Finally, I implemented radix sort on the GPU leveraging both scan and scatter. Radix sort works by processing the binary representation of each integer starting from the least significant bit until the most significant. At each iteration, the algorithm partitions the array so that all elements with a 0 in the current bit appear before any with a 1, while preserving the relative order of elements in each of the partitions.
+Lastly, I implemented radix sort on the GPU leveraging both scan and scatter. Radix sort works by processing the binary representation of each integer starting from the least significant bit until the most significant. At each iteration, the algorithm partitions the array so that all elements with a 0 in the current bit appear before any with a 1, while preserving the relative order of elements in each of the partitions.
 ![CPU Radix Sort](img/figure13.png)|
 |:--:|
 |CPU Radix Sort from CIS 5650 slides|
